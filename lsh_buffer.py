@@ -1,11 +1,12 @@
+import bisect
 import collections
-import functools
 import math
 import random
 import typing
 from scipy.stats import norm
 
 from river.utils import VectorDict
+from river.utils.math import minkowski_distance
 
 
 class LSHBuffer:
@@ -14,30 +15,33 @@ class LSHBuffer:
     Parameters
     ----------
     max_size
+        The size of the buffer to store samples.
+    R
+        The radius of the hypersphere that defines the R-Nearest Neighbours around a query point.
+    delta
+        Acceptable probability of failing to return a "R"-neighbour for a query point. Hence,
+        the probability of success is $1 - \\delta$.
     k
         The number of hash functions per table.
-    r
+    w
         The quantization radius.
-    c
-        The approximation factor.
-    delta
-        Probability of not returning a "r"-neighbour. Hence, the probability of success is
-        $1 - \\delta$.
-    mode
-        exact, approximate
     seed
     """
 
-    def __init__(self, max_size: int = 1000, k: int = 10, r: float = 4, c: float = 1.5,
-                 delta: float = 0.1, seed=None):
+    def __init__(self, max_size: int = 1000, R: float = 1.0, delta: float = 0.1, k: int = 3,
+                 w: float = 4, seed=None):
         self.max_size = max_size
         self.k = k
-        self.r = r
-        self.c = c  # TODO verify later
-        self.p1 = 1 - 2 * norm.cdf(-self.r) - ((2 / (math.sqrt(2 * math.pi) * self.r))
-                           * (1 - math.exp(-(self.r ** 2) / 2)))
-        # self.p2 = ...
-        self.L = math.ceil(math.log(1 / delta) / (- math.log(1 - self.p1 ** self.k)))
+        self.w = w
+
+        if not R > 0:
+            raise ValueError(f'"R" must be greater than zero.')
+        self.R = R
+
+        self._pr_col = 1 - 2 * norm.cdf(-self.w) - (
+            (2 / (math.sqrt(2 * math.pi) * self.w)) * (1 - math.exp(-(self.w ** 2) / 2))
+        )
+        self.L = math.ceil(math.log(1 / delta) / (- math.log(1 - self._pr_col ** self.k)))
         self.seed = seed
 
         self._size: int = 0
@@ -53,6 +57,10 @@ class LSHBuffer:
     def size(self) -> int:
         return self._size
 
+    @property
+    def success_probability(self):
+        return 1 - (1 - self._pr_col ** self.k) ** self.L
+
     def _init_projections(self, x):
         """Initialize the random projections.
 
@@ -62,12 +70,13 @@ class LSHBuffer:
             Observation from which infer the dimension of the projections.
         """
         Axb = collections.namedtuple('Ab', ['a', 'b'])
+        self._rprojs = {}
         for h in range(self.L):
             self._rprojs[h] = {}
             for p in range(self.k):
                 self._rprojs[h][p] = Axb(
                     a=VectorDict(data={fid: self._rng.gauss(mu=0, sigma=1) for fid in x}),
-                    b=self._rng.uniform(0, self.r)
+                    b=self._rng.uniform(0, self.w)
                 )
 
     def _hash(self, x):
@@ -78,18 +87,20 @@ class LSHBuffer:
         x
             Sample for which we want to calculate the hash code.
         """
-        x_ = VectorDict(x)
+        # Scale down x by factor R
+        x_ = VectorDict({i: x[i] / self.R for i in x})
         for h in range(self.L):
-            projection = []
-            for p in range(self.k):  # TODO use map here?
-                projection.append(
-                    math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.r)
-                )
-            yield tuple(projection)
+            yield tuple(
+                math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
+                for p in range(self.k)
+            )
 
     def _rem_from_hash(self, x, index):
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].discard(index)
+
+            if len(self._lsh[h][code]) == 0:
+                del self._lsh[h][code]
 
     def append(self, elem):
         x, y = elem
@@ -101,7 +112,7 @@ class LSHBuffer:
 
         # Remove previously stored element from the hash tables
         if slot_replaced:
-            x, = self._buffer[self._next]
+            x, _ = self._buffer[self._next]
             self._rem_from_hash(x, self._next)
 
         # Adds element to the buffer
@@ -151,8 +162,38 @@ class LSHBuffer:
 
             return x, y
 
-    def query(self, x, n_neighbors=3, *, probes=1):
-        pass
+    def query(self, x, eps=None, *, p=2):
+        if eps is None:
+            eps = math.inf
 
-    def query_ball(self, x, eps=0.5, *, probes=1):
-        pass
+        # Retrieve points
+        point_set = set()
+        for h, code in enumerate(self._hash(x)):
+            point_set |= self._lsh[h][code]
+
+        points = []
+        distances = []
+        for q in point_set:
+            x_q, _ = self._buffer[q]
+            dist = minkowski_distance(x, x_q, p=2)
+
+            # Skip points whose distance to x is greater than eps
+            if dist > eps:
+                continue
+
+            # Retrieve points ordered by their distance to the query point
+            pos = bisect.bisect(distances, dist)
+            distances.insert(pos, dist)
+            points.insert(pos, self._buffer[q])
+
+        return distances, points
+
+    def clear(self) -> 'LSHBuffer':
+        """Clear all stored elements."""
+        self._next = 0
+        self._oldest = 0
+        self._size = 0
+        self._buffer: list = [None for _ in range(self.max_size)]
+        self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
+
+        return self
