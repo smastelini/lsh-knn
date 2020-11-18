@@ -6,7 +6,7 @@ from river import synth
 
 from radius_neighbors import RadiusNeighborsRegressor
 
-dataset = iter(synth.Friedman(seed=1).take(5000))
+dataset = iter(synth.Friedman(seed=1).take(50000))
 
 # model = (
 #     preprocessing.StandardScaler() |
@@ -24,5 +24,5 @@ evaluate.progressive_val_score(dataset, model, metric, print_every=100, show_tim
                                show_memory=True)
 
 
-print(model['RadiusNeighborsRegressor']._buffer.L)
-print(model['RadiusNeighborsRegressor']._buffer.success_probability)
+# print(model['RadiusNeighborsRegressor']._buffer.L)
+# print(model['RadiusNeighborsRegressor']._buffer.success_probability)

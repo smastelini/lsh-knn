@@ -1,3 +1,5 @@
+cimport cython
+
 import bisect
 import collections
 import math
@@ -21,10 +23,11 @@ cdef class LSHBuffer:
         Acceptable probability of failing to return a "R"-neighbour for a query point. Hence,
         the probability of success is $1 - \\delta$.
     k
-        The number of hash functions per table.
+        The number of hash functions per table, i.e., the dimension of the projections.
     w
         The quantization radius.
     seed
+        Random number generator seed for reproducibility.
     """
 
     cdef readonly long max_size
@@ -41,8 +44,8 @@ cdef class LSHBuffer:
     cdef double _pr_col
     cdef list _buffer
     cdef list _lsh
-    cdef dict _rprojs
-    cdef _rng
+    cdef list _rprojs
+    cdef object _rng
 
 
     def __init__(self, max_size: int = 1000, R: float = 1.0, delta: float = 0.1, k: int = 3,
@@ -62,15 +65,15 @@ cdef class LSHBuffer:
         self.L = <long> math.ceil(
             math.log(1. / delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
         )
-        self.seed = seed
 
         self.size = 0
         self._next = 0  # Next position to add in the buffer
         self._oldest = 0  # The oldest position in the buffer
-        self._buffer = [None for _ in range(self.max_size)]
+        self._buffer = [None] * self.max_size
         self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
-
         self._rprojs = None
+
+        self.seed = seed
         self._rng = random.Random(self.seed)
 
     @property
@@ -86,16 +89,17 @@ cdef class LSHBuffer:
             Observation from which infer the dimension of the projections.
         """
         Axb = collections.namedtuple('Ab', ['a', 'b'])
-        self._rprojs = {}
+        self._rprojs = [None] * self.L
         for h in range(self.L):
-            self._rprojs[h] = {}
+            self._rprojs[h] = [None] * self.k
             for p in range(self.k):
+                # Initalize random projections
                 self._rprojs[h][p] = Axb(
                     a=VectorDict(data={fid: self._rng.gauss(mu=0, sigma=1) for fid in x}),
                     b=self._rng.uniform(0, self.w)
                 )
 
-    cdef list _hash(self, dict x):
+    cdef _hash(self, dict x):
         """Generate the codes of a given observation for each of the L hash tables.
 
         Parameters
@@ -105,13 +109,12 @@ cdef class LSHBuffer:
         """
         # Scale down x by factor R
         cdef x_ = VectorDict({i: x[i] / self.R for i in x})
-        cdef list codes = []
+
+        codes = [None] * self.L
         for h in range(self.L):
-            codes.append(
-                tuple(
-                    math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
-                    for p in range(self.k)
-                )
+            codes[h] = tuple(
+                math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
+                for p in range(self.k)
             )
 
         return codes
@@ -134,11 +137,11 @@ cdef class LSHBuffer:
         if not self._rprojs:
             self._init_projections(x)
 
-        slot_replaced = self._buffer[self._next] is not None
+        cdef bint slot_replaced = self._buffer[self._next] is not None
 
         # Remove previously stored element from the hash tables
         if slot_replaced:
-            x, _ = self._buffer[self._next]
+            x_ = self._buffer[self._next][0]
             self._rem_from_hash(x, self._next)
 
         # Adds element to the buffer
@@ -185,19 +188,22 @@ cdef class LSHBuffer:
 
             return x, y
 
-    def query(self, x, eps=None, *, p=2):
+    def query(self, x: dict, eps: float = None, *, p: float = 2):
         if eps is None:
             eps = math.inf
 
         # Retrieve points
-        point_set = set()
+        cdef set point_set = set()
         for h, code in enumerate(self._hash(x)):
             point_set |= self._lsh[h][code]
 
-        points = []
-        distances = []
+        cdef list points = list()
+        cdef list distances = list()
+        cdef dict x_q
+        cdef double dist
+        cdef long pos
         for q in point_set:
-            x_q, _ = self._buffer[q]
+            x_q = self._buffer[q][0]
             dist = minkowski_distance(x, x_q, p=2)
 
             # Skip points whose distance to x is greater than eps
@@ -216,7 +222,7 @@ cdef class LSHBuffer:
         self._next = 0
         self._oldest = 0
         self.size = 0
-        self._buffer = [None for _ in range(self.max_size)]
+        self._buffer = [None] * self.max_size
         self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
 
         return self
