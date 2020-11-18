@@ -113,7 +113,7 @@ cdef class LSHBuffer:
         codes = [None] * self.L
         for h in range(self.L):
             codes[h] = tuple(
-                math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
+                <long> math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
                 for p in range(self.k)
             )
 
