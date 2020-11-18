@@ -119,7 +119,7 @@ cdef class LSHBuffer:
 
         return codes
 
-    cdef void _add2hash(self, dict x, long index):
+    cdef void _add_to_hash(self, dict x, long index):
         # Save buffer index in the correct hash positions
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].add(index)  # Add index to bucket
@@ -131,7 +131,7 @@ cdef class LSHBuffer:
             if len(self._lsh[h][code]) == 0:
                 del self._lsh[h][code]
 
-    def append(self, elem):
+    cpdef void append(self, tuple elem):
         x, y = elem
 
         if not self._rprojs:
@@ -146,7 +146,7 @@ cdef class LSHBuffer:
 
         # Adds element to the buffer
         self._buffer[self._next] = elem
-        self._add2hash(x, self._next)
+        self._add_to_hash(x, self._next)
 
         # Update the circular buffer index
         self._next += 1 if self._next < self.max_size - 1 else 0
@@ -156,7 +156,7 @@ cdef class LSHBuffer:
         else:  # Actual buffer increased
             self.size += 1
 
-    def pop(self):
+    cpdef tuple pop(self):
         """Remove and return the most recent element added to the buffer."""
         if self.size > 0:
             self._next = self._next - 1 if self._next > 0 else self.max_size - 1
@@ -170,7 +170,7 @@ cdef class LSHBuffer:
 
             return x, y
 
-    def popleft(self):
+    cpdef tuple popleft(self):
         """Remove and return the oldest element in the buffer."""
         if self.size > 0:
             x, y = self._buffer[self._oldest]
@@ -188,8 +188,8 @@ cdef class LSHBuffer:
 
             return x, y
 
-    def query(self, x: dict, eps: float = None, *, p: float = 2):
-        if eps is None:
+    cpdef tuple query(self, dict x, double eps=0., double p=2.):
+        if eps == 0.:
             eps = math.inf
 
         # Retrieve points
@@ -217,7 +217,7 @@ cdef class LSHBuffer:
 
         return distances, points
 
-    def clear(self) -> 'LSHBuffer':
+    cpdef LSHBuffer clear(self):
         """Clear all stored elements."""
         self._next = 0
         self._oldest = 0
