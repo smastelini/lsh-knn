@@ -15,7 +15,7 @@ class RadiusNeighborsRegressor(base.Regressor):
     Parameters
     ----------
     r
-        The radius of the hypersphere for constructing. This parameter defines
+        The radius of the hypersphere for constructing the LSH structure. This parameter defines
         the r-neighborhood around each query point.
     max_size
         The maximum size of the window storing the last observed samples.
