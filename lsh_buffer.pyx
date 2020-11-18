@@ -2,14 +2,13 @@ import bisect
 import collections
 import math
 import random
-import typing
 from scipy.stats import norm
 
 from river.utils import VectorDict
 from river.utils.math import minkowski_distance
 
 
-class LSHBuffer:
+cdef class LSHBuffer:
     """
 
     Parameters
@@ -28,8 +27,26 @@ class LSHBuffer:
     seed
     """
 
+    cdef readonly long max_size
+    cdef readonly long size
+    cdef readonly double R
+    cdef readonly double delta
+    cdef readonly long k
+    cdef readonly long L
+    cdef readonly double w
+    cdef readonly long seed
+
+    cdef long _next
+    cdef long _oldest
+    cdef double _pr_col
+    cdef list _buffer
+    cdef list _lsh
+    cdef dict _rprojs
+    cdef _rng
+
+
     def __init__(self, max_size: int = 1000, R: float = 1.0, delta: float = 0.1, k: int = 3,
-                 w: float = 4, seed=None):
+                 w: float = 4, seed: int = None):
         self.max_size = max_size
         self.k = k
         self.w = w
@@ -38,30 +55,29 @@ class LSHBuffer:
             raise ValueError(f'"R" must be greater than zero.')
         self.R = R
 
-        self._pr_col = 1 - 2 * norm.cdf(-self.w) - (
-            (2 / (math.sqrt(2 * math.pi) * self.w)) * (1 - math.exp(-(self.w ** 2) / 2))
+        self._pr_col = 1. - 2. * norm.cdf(-self.w) - (
+            (2. / (math.sqrt(2. * math.pi) * self.w))
+            * (1. - math.exp(-(math.pow(self.w, 2)) / 2.))
         )
-        self.L = math.ceil(math.log(1 / delta) / (- math.log(1 - self._pr_col ** self.k)))
+        self.L = <long> math.ceil(
+            math.log(1. / delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
+        )
         self.seed = seed
 
-        self._size: int = 0
-        self._next: int = 0  # Next position to add in the buffer
-        self._oldest: int = 0  # The oldest position in the buffer
-        self._buffer: list = [None for _ in range(self.max_size)]
+        self.size = 0
+        self._next = 0  # Next position to add in the buffer
+        self._oldest = 0  # The oldest position in the buffer
+        self._buffer = [None for _ in range(self.max_size)]
         self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
 
         self._rprojs = None
         self._rng = random.Random(self.seed)
 
     @property
-    def size(self) -> int:
-        return self._size
+    def success_probability(self) -> float:
+        return 1 - (1 - math.pow(self._pr_col, self.k)) ** self.L
 
-    @property
-    def success_probability(self):
-        return 1 - (1 - self._pr_col ** self.k) ** self.L
-
-    def _init_projections(self, x):
+    cdef void _init_projections(self, dict x):
         """Initialize the random projections.
 
         Parameters
@@ -79,7 +95,7 @@ class LSHBuffer:
                     b=self._rng.uniform(0, self.w)
                 )
 
-    def _hash(self, x):
+    cdef list _hash(self, dict x):
         """Generate the codes of a given observation for each of the L hash tables.
 
         Parameters
@@ -88,14 +104,24 @@ class LSHBuffer:
             Sample for which we want to calculate the hash code.
         """
         # Scale down x by factor R
-        x_ = VectorDict({i: x[i] / self.R for i in x})
+        cdef x_ = VectorDict({i: x[i] / self.R for i in x})
+        cdef list codes = []
         for h in range(self.L):
-            yield tuple(
-                math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
-                for p in range(self.k)
+            codes.append(
+                tuple(
+                    math.floor((self._rprojs[h][p].a @ x_ + self._rprojs[h][p].b) / self.w)
+                    for p in range(self.k)
+                )
             )
 
-    def _rem_from_hash(self, x, index):
+        return codes
+
+    cdef void _add2hash(self, dict x, long index):
+        # Save buffer index in the correct hash positions
+        for h, code in enumerate(self._hash(x)):
+            self._lsh[h][code].add(index)  # Add index to bucket
+
+    cdef void _rem_from_hash(self, x, index):
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].discard(index)
 
@@ -117,10 +143,7 @@ class LSHBuffer:
 
         # Adds element to the buffer
         self._buffer[self._next] = elem
-
-        # Save buffer index in the correct hash positions
-        for h, code in enumerate(self._hash(x)):
-            self._lsh[h][code].add(self._next)  # Add index to bucket
+        self._add2hash(x, self._next)
 
         # Update the circular buffer index
         self._next += 1 if self._next < self.max_size - 1 else 0
@@ -128,7 +151,7 @@ class LSHBuffer:
         if slot_replaced:
             self._oldest = self._next
         else:  # Actual buffer increased
-            self._size += 1
+            self.size += 1
 
     def pop(self):
         """Remove and return the most recent element added to the buffer."""
@@ -140,7 +163,7 @@ class LSHBuffer:
             self._rem_from_hash(x, self._next)
 
             # Update buffer size
-            self._size -= 1
+            self.size -= 1
 
             return x, y
 
@@ -158,7 +181,7 @@ class LSHBuffer:
                 self._oldest = self._next = 0
 
             # Update buffer size
-            self._size -= 1
+            self.size -= 1
 
             return x, y
 
@@ -192,8 +215,8 @@ class LSHBuffer:
         """Clear all stored elements."""
         self._next = 0
         self._oldest = 0
-        self._size = 0
-        self._buffer: list = [None for _ in range(self.max_size)]
+        self.size = 0
+        self._buffer = [None for _ in range(self.max_size)]
         self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
 
         return self

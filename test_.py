@@ -8,15 +8,15 @@ from radius_neighbors import RadiusNeighborsRegressor
 
 dataset = iter(synth.Friedman(seed=1).take(5000))
 
-model = (
-    preprocessing.StandardScaler() |
-    neighbors.KNNRegressor(window_size=200)
-)
-
 # model = (
 #     preprocessing.StandardScaler() |
-#     RadiusNeighborsRegressor(max_size=200, r=1, aggregation='distance', delta=0.1, seed=42, k=4)
+#     neighbors.KNNRegressor(window_size=200)
 # )
+
+model = (
+    preprocessing.StandardScaler() |
+    RadiusNeighborsRegressor(max_size=200, r=1, aggregation='distance', delta=0.1, seed=42, k=4)
+)
 
 metric = metrics.MAE()
 
@@ -24,5 +24,5 @@ evaluate.progressive_val_score(dataset, model, metric, print_every=100, show_tim
                                show_memory=True)
 
 
-# print(model['RadiusNeighborsRegressor']._buffer.L)
-# print(model['RadiusNeighborsRegressor']._buffer.success_probability)
+print(model['RadiusNeighborsRegressor']._buffer.L)
+print(model['RadiusNeighborsRegressor']._buffer.success_probability)
