@@ -4,7 +4,9 @@ import bisect
 import collections
 import math
 import random
+
 from scipy.stats import norm
+import numpy as np
 
 from river.utils import VectorDict
 from river.utils.math import minkowski_distance
@@ -30,51 +32,61 @@ cdef class LSHBuffer:
         Random number generator seed for reproducibility.
     """
 
-    cdef readonly long max_size
-    cdef readonly long size
-    cdef readonly double R
-    cdef readonly double delta
-    cdef readonly long k
-    cdef readonly long L
-    cdef readonly double w
-    cdef readonly long seed
+    cdef:
+        readonly long max_size
+        readonly long size
+        readonly double R
+        readonly double delta
+        readonly long k
+        readonly long L
+        readonly double w
+        readonly long p
+        readonly long seed
 
-    cdef long _next
-    cdef long _oldest
-    cdef double _pr_col
-    cdef list _buffer
-    cdef list _lsh
-    cdef list _rprojs
-    cdef object _rng
+        long _next
+        long _oldest
+        double _pr_col
+        list _buffer
+        list _lsh
+        list _rprojs
+        object _rng
 
 
     def __init__(self, max_size: int = 1000, R: float = 1.0, delta: float = 0.1, k: int = 3,
-                 w: float = 4, seed: int = None):
+                 w: float = 4, p: int = 2, seed: int = None):
         self.max_size = max_size
-        self.k = k
-        self.w = w
-
         if not R > 0:
             raise ValueError(f'"R" must be greater than zero.')
         self.R = R
+
+        self.delta = delta
+        self.k = k
+        self.w = w
+
+        if not 1 <= p <= 2:
+            raise ValueError(f'Invalid value of "p". It must be either "1" or "2".')
+        self.p = p
 
         self._pr_col = 1. - 2. * norm.cdf(-self.w) - (
             (2. / (math.sqrt(2. * math.pi) * self.w))
             * (1. - math.exp(-(math.pow(self.w, 2)) / 2.))
         )
         self.L = <long> math.ceil(
-            math.log(1. / delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
+            math.log(1. / self.delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
         )
 
+        # Random number generators
+        self.seed = seed
+        self._rng = random.Random(self.seed)
+        np.random.seed(self.seed)
+
+        # Inner properties
         self.size = 0
         self._next = 0  # Next position to add in the buffer
         self._oldest = 0  # The oldest position in the buffer
-        self._buffer = [None] * self.max_size
+        self._buffer = [None] * self.max_size  # The actual buffer
         self._lsh = [collections.defaultdict(set) for _ in range(self.L)]
-        self._rprojs = None
-
-        self.seed = seed
-        self._rng = random.Random(self.seed)
+        self._rprojs = None  # The random projections
 
     @property
     def success_probability(self) -> float:
@@ -88,18 +100,28 @@ cdef class LSHBuffer:
         x
             Observation from which infer the dimension of the projections.
         """
-        Axb = collections.namedtuple('Ab', ['a', 'b'])
+        cdef Axb = collections.namedtuple('Ab', ['a', 'b'])
         self._rprojs = [None] * self.L
-        for h in range(self.L):
-            self._rprojs[h] = [None] * self.k
-            for p in range(self.k):
-                # Initalize random projections
-                self._rprojs[h][p] = Axb(
-                    a=VectorDict(data={fid: self._rng.gauss(mu=0, sigma=1) for fid in x}),
-                    b=self._rng.uniform(0, self.w)
-                )
+        if self.p == 1:
+            for h in range(self.L):
+                self._rprojs[h] = [None] * self.k
+                for p in range(self.k):
+                    # Initalize random projections by sampling from a standard Cauchy dist
+                    self._rprojs[h][p] = Axb(
+                        a=VectorDict(data={fid: np.random.standard_cauchy() for fid in x}),
+                        b=self._rng.uniform(0, self.w)
+                    )
+        else:
+            for h in range(self.L):
+                self._rprojs[h] = [None] * self.k
+                for p in range(self.k):
+                    # Initalize random projections by sampling from a standard Gaussian dist
+                    self._rprojs[h][p] = Axb(
+                        a=VectorDict(data={fid: self._rng.gauss(mu=0, sigma=1) for fid in x}),
+                        b=self._rng.uniform(0, self.w)
+                    )
 
-    cdef _hash(self, dict x):
+    cdef list _hash(self, dict x):
         """Generate the codes of a given observation for each of the L hash tables.
 
         Parameters
@@ -142,7 +164,7 @@ cdef class LSHBuffer:
         # Remove previously stored element from the hash tables
         if slot_replaced:
             x_ = self._buffer[self._next][0]
-            self._rem_from_hash(x, self._next)
+            self._rem_from_hash(x_, self._next)
 
         # Adds element to the buffer
         self._buffer[self._next] = elem
@@ -188,21 +210,30 @@ cdef class LSHBuffer:
 
             return x, y
 
-    cpdef tuple query(self, dict x, long max_points=-1, double p=2.):
+    cpdef tuple query(self, dict x, double max_points=-1, double p=2.):
+        if max_points < 0:
+            max_points = math.inf
+
+        cdef:
+            long count = 0
+            set point_set = set()
+
         # Retrieve points
-        cdef set point_set = set()
         for h, code in enumerate(self._hash(x)):
             point_set |= self._lsh[h][code]
 
-        cdef list points = list()
-        cdef list distances = list()
-        cdef dict x_q
-        cdef double dist
-        cdef long pos
-        for i, q in enumerate(point_set):
-            if max_points > 0 and i > max_points:
+            count += len(self._lsh[h][code])
+            # Approximated search: stop once max_points are explored
+            if count >= max_points:
                 break
 
+        cdef:
+            list points = list()
+            list distances = list()
+            double dist
+            long pos
+
+        for q in point_set:
             dist = minkowski_distance(x, self._buffer[q][0], p=2)
 
             # Retrieve points ordered by their distance to the query point

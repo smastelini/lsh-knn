@@ -85,7 +85,7 @@ class RadiusNeighborsRegressor(base.Regressor):
             # Not enough information available, return default prediction
             return 0.
 
-        dists, neighbors = self._buffer.query(x)
+        dists, neighbors = self._buffer.query(x, max_points=3 * self._buffer.L)
         if len(neighbors) == 0:
             # No near neighbors were found
             return 0.

@@ -10,12 +10,12 @@ dataset = iter(synth.Friedman(seed=1).take(50000))
 
 # model = (
 #     preprocessing.StandardScaler() |
-#     neighbors.KNNRegressor(window_size=200)
+#     neighbors.KNNRegressor(window_size=1000)
 # )
 
 model = (
     preprocessing.StandardScaler() |
-    RadiusNeighborsRegressor(max_size=1000, r=0.5, aggregation='distance',
+    RadiusNeighborsRegressor(max_size=1000, r=1, aggregation='distance',
                              delta=0.1, seed=42, k=4)
 )
 
