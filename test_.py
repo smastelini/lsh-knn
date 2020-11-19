@@ -15,7 +15,8 @@ dataset = iter(synth.Friedman(seed=1).take(50000))
 
 model = (
     preprocessing.StandardScaler() |
-    RadiusNeighborsRegressor(max_size=200, r=1, aggregation='distance', delta=0.1, seed=42, k=4)
+    RadiusNeighborsRegressor(max_size=1000, r=0.5, aggregation='distance',
+                             delta=0.1, seed=42, k=4)
 )
 
 metric = metrics.MAE()

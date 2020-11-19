@@ -124,7 +124,7 @@ cdef class LSHBuffer:
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].add(index)  # Add index to bucket
 
-    cdef void _rem_from_hash(self, x, index):
+    cdef void _rem_from_hash(self, dict x, long index):
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].discard(index)
 
@@ -188,10 +188,7 @@ cdef class LSHBuffer:
 
             return x, y
 
-    cpdef tuple query(self, dict x, double eps=0., double p=2.):
-        if eps == 0.:
-            eps = math.inf
-
+    cpdef tuple query(self, dict x, long max_points=-1, double p=2.):
         # Retrieve points
         cdef set point_set = set()
         for h, code in enumerate(self._hash(x)):
@@ -202,13 +199,11 @@ cdef class LSHBuffer:
         cdef dict x_q
         cdef double dist
         cdef long pos
-        for q in point_set:
-            x_q = self._buffer[q][0]
-            dist = minkowski_distance(x, x_q, p=2)
+        for i, q in enumerate(point_set):
+            if max_points > 0 and i > max_points:
+                break
 
-            # Skip points whose distance to x is greater than eps
-            if dist > eps:
-                continue
+            dist = minkowski_distance(x, self._buffer[q][0], p=2)
 
             # Retrieve points ordered by their distance to the query point
             pos = bisect.bisect(distances, dist)
