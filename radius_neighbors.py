@@ -8,14 +8,14 @@ class RadiusNeighborsRegressor(base.Regressor):
 
     This non-parametric regression method keeps track of the last `window_size` training
     samples. Predictions are obtained by aggregating the values of the (closest) neighbors
-    within the radius `r` from which query point. This implementation relies on an incrementally
+    within the radius `r` from each query point. This implementation relies on an incrementally
     maintained Locality Sensitive Hashing Structure (LSH) to speed up nearest neighbor
     queries.
 
     Parameters
     ----------
     r
-        The radius of the hypersphere for constructing. This parameter defines
+        The radius of the hypersphere for constructing the LSH structure. This parameter defines
         the r-neighborhood around each query point.
     max_size
         The maximum size of the window storing the last observed samples.
