@@ -21,17 +21,22 @@ cdef class LSHBuffer:
         The size of the buffer to store samples.
     R
         The radius of the hypersphere that defines the R-Nearest Neighbours around a query point.
+    c
+        The approximation factor. Points within the distance `c * r` of a query point are
+        guaranteed to be found with probability `1 - delta`.
     delta
-        Acceptable probability of failing to return a "R"-neighbour for a query point. Hence,
-        the probability of success is $1 - \\delta$.
+        Acceptable probability of failing to return a "c * R"-neighbour for a query point.
+        Hence, the probability of success is $1 - \\delta$.
     k
         The number of hash functions per table, i.e., the dimension of the projections.
     w
         The quantization radius.
     p
-        p-norm value for the Minkowski metric. When `p=1`, this corresponds to the
-        Manhattan distance, while `p=2` corresponds to the Euclidean distance.
-        Only `p=2` is currently supported.
+        Defines the $l_p$ norm used to sample from p-stable distributions and partition
+        the input space. When `p=1` the linear coefficients of the random projections are
+        sampled from a standard Cauchy distribution (which is 1-stable). When `p=2`,
+        the linear coefficients are sampled from a standard Gaussian distribution,
+        which is 2-stable.
     seed
         Random number generator seed for reproducibility.
     """
@@ -40,6 +45,7 @@ cdef class LSHBuffer:
         readonly long max_size
         readonly long size
         readonly double R
+        readonly double c
         readonly double delta
         readonly long k
         readonly long L
@@ -47,22 +53,29 @@ cdef class LSHBuffer:
         readonly long p
         readonly long seed
 
-        double _c
+        double _cR
         long _next
         long _oldest
         double _pr_col
+        double _pr_wrong_col
         list _buffer
         list _lsh
         list _rprojs
         object _rng
 
 
-    def __init__(self, max_size: int = 1000, R: float = 1.0, delta: float = 0.1, k: int = 3,
-                 w: float = 4, p: int = 2, seed: int = None):
+    def __init__(self, max_size: int = 1000, R: float = 1.0, c: float = 2.0, delta: float = 0.1,
+                 k: int = 3, w: float = 4.0, p: int = 2, seed: int = None):
         self.max_size = max_size
         if not R > 0:
             raise ValueError(f'"R" must be greater than zero.')
         self.R = R
+
+        if c < 1:
+            raise ValueError('"c" must be greater than or equal to 1.')
+
+        self.c = c
+        self._cR = self.c * self.R
 
         self.delta = delta
         self.k = k
@@ -73,14 +86,19 @@ cdef class LSHBuffer:
         self.p = p
 
         if self.p == 1:
-            self._c = self.R
+            self._pr_col = 2 * (math.atan(self.w) / math.pi) - (
+                1. / (math.pi * (self.w))) * math.log(1 + (self.w) ** 2)
+            self._pr_wrong_col = 2 * (math.atan(self.w / self.c) / math.pi) - (
+                1. / (math.pi * (self.w / self.c))) * math.log(1 + (self.w / self.c) ** 2)
         else:
-            self._c = self.R * self.R
-
-        self._pr_col = 1. - 2. * norm.cdf(-self.w) - (
-            (2. / (math.sqrt(2. * math.pi) * self.w))
-            * (1. - math.exp(-(math.pow(self.w, 2)) / 2.))
-        )
+            self._pr_col = 1. - 2. * norm.cdf(-self.w) - (
+                (2. / (math.sqrt(2. * math.pi) * self.w))
+                * (1. - math.exp(-(math.pow(self.w, 2)) / 2.))
+            )
+            self._pr_wrong_col = 1. - 2. * norm.cdf(-self.w / self.c) - (
+                (2. / (math.sqrt(2. * math.pi) * self.w / self.c))
+                * (1. - math.exp(-(.5 * math.pow(self.w / self.c, 2))))
+            )
 
         self.L = <long> math.ceil(
             math.log(1. / self.delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
@@ -100,8 +118,12 @@ cdef class LSHBuffer:
         self._rprojs = None  # The random projections
 
     @property
-    def success_probability(self) -> float:
+    def P1(self) -> float:
         return 1 - (1 - math.pow(self._pr_col, self.k)) ** self.L
+
+    @property
+    def P2(self) -> float:
+        return 1 - (1 - math.pow(self._pr_wrong_col, self.k)) ** self.L
 
 
     cdef double _distance(self, a, b):
@@ -228,7 +250,7 @@ cdef class LSHBuffer:
 
             return x, y
 
-    cpdef tuple query(self, dict x, double max_points=-1, double p=2.):
+    cpdef tuple query(self, dict x, double max_points=-1):
         if max_points < 0:
             max_points = math.inf
 
@@ -254,7 +276,7 @@ cdef class LSHBuffer:
         for q in point_set:
             dist = self._distance(x, self._buffer[q][0])
 
-            if dist > self._c:
+            if dist > self._cR:
                 continue
 
             # Retrieve points ordered by their distance to the query point

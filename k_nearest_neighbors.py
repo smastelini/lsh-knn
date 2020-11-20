@@ -29,10 +29,13 @@ class KNNRegressor(base.Regressor):
     r
         The radius of the hypersphere for constructing the LSH structure. This parameter defines
         the r-neighborhood around each query point.
+    c
+        The approximation factor. Points within the distance `c * r` of a query point are
+        guaranteed to be found with probability `1 - delta`.
     k
         The number of random projections per hash table in the LSH scheme.
     delta
-        The acceptable probability of failing to find a neighbor within distance `r`
+        The acceptable probability of failing to find a neighbor within distance `c * r`
         of the query point.
     w
         The quantization radius of the LSH scheme.
@@ -72,7 +75,7 @@ class KNNRegressor(base.Regressor):
     _VALID = [_MEAN, _WEIGHTED_MEAN]
 
     def __init__(self, n_neighbors: int = 5, window_size: int = 1000, p: int = 2,
-                 aggregation_method: str = 'mean', r: float = 1, k: int = 3,
+                 aggregation_method: str = 'mean', r: float = 1, c: float = 2, k: int = 3,
                  delta: float = 0.1, w: float = 4, seed: int = None):
         super().__init__()
         self.n_neighbors = n_neighbors
@@ -85,13 +88,14 @@ class KNNRegressor(base.Regressor):
         self.aggregation_method = aggregation_method
 
         self.r = r
+        self.c = c
         self.k = k
         self.delta = delta
         self.w = w
         self.seed = seed
 
-        self._buffer = LSHBuffer(max_size=self.window_size, R=self.r, k=self.k, delta=self.delta,
-                                 w=self.w, p=self.p, seed=self.seed)
+        self._buffer = LSHBuffer(max_size=self.window_size, R=self.r, c=self.c, k=self.k,
+                                 delta=self.delta, w=self.w, p=self.p, seed=self.seed)
 
     def learn_one(self, x, y):
         """Update the model with a set of features `x` and a real target value `y`.
@@ -139,7 +143,7 @@ class KNNRegressor(base.Regressor):
             # Not enough information available, return default prediction
             return 0.
 
-        dists, neighbors = self._buffer.query(x, max_points=3 * self._buffer.L)
+        dists, neighbors = self._buffer.query(x)
 
         if len(neighbors) == 0:
             if self._buffer.size == self.window_size:

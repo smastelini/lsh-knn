@@ -17,6 +17,9 @@ class RadiusNeighborsRegressor(base.Regressor):
     r
         The radius of the hypersphere for constructing the LSH structure. This parameter defines
         the r-neighborhood around each query point.
+    c
+        The approximation factor. Points within the distance `c * r` of a query point are
+        guaranteed to be found with probability `1 - delta`.
     max_size
         The maximum size of the window storing the last observed samples.
     p
@@ -32,7 +35,7 @@ class RadiusNeighborsRegressor(base.Regressor):
     k
         The number of random projections per hash table in the LSH scheme.
     delta
-        The acceptable probability of failing to find a neighbor within distance `r`
+        The acceptable probability of failing to find a neighbor within distance `c * r`
         of the query point.
     w
         The quantization radius of the LSH scheme.
@@ -57,11 +60,12 @@ class RadiusNeighborsRegressor(base.Regressor):
     _UNIFORM = 'uniform'
     _DISTANCE = 'distance'
 
-    def __init__(self, r: float = 1.0, max_size: int = 1000, p: float = 2,
+    def __init__(self, r: float = 1.0, c: float = 2.0, max_size: int = 1000, p: float = 2,
                  aggregation: str = 'uniform', k: int = 3, delta: float = 0.1, w: float = 4,
                  seed: int = None):
         super().__init__()
         self.r = r
+        self.c = c
         self.max_size = max_size
         self.p = 2
         self.k = k
@@ -74,8 +78,8 @@ class RadiusNeighborsRegressor(base.Regressor):
                              f'Valid options are: {[self._UNIFORM, self._DISTANCE]}.')
         self.aggregation = aggregation
 
-        self._buffer = LSHBuffer(R=self.r, max_size=self.max_size, k=self.k, delta=self.delta,
-                                 w=self.w, seed=self.seed)
+        self._buffer = LSHBuffer(R=self.r, c=self.c, max_size=self.max_size, k=self.k,
+                                 delta=self.delta, w=self.w, seed=self.seed)
 
     def learn_one(self, x, y):  # noqa
         self._buffer.append((x, y))
