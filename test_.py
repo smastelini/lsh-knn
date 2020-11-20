@@ -4,7 +4,8 @@ from river import neighbors
 from river import preprocessing
 from river import synth
 
-from radius_neighbors import RadiusNeighborsRegressor
+# from radius_neighbors import RadiusNeighborsRegressor
+from k_nearest_neighbors import KNNRegressor
 
 dataset = iter(synth.Friedman(seed=1).take(50000))
 
@@ -13,10 +14,17 @@ dataset = iter(synth.Friedman(seed=1).take(50000))
 #     neighbors.KNNRegressor(window_size=1000)
 # )
 
+# model = (
+#     preprocessing.StandardScaler() |
+#     RadiusNeighborsRegressor(max_size=1000, r=1, aggregation='distance',
+#                              delta=0.1, seed=42, k=4)
+# )
+
 model = (
     preprocessing.StandardScaler() |
-    RadiusNeighborsRegressor(max_size=1000, r=1, aggregation='distance',
-                             delta=0.1, seed=42, k=4)
+    KNNRegressor(
+        n_neighbors=5, window_size=1000, r=1, aggregation_method='mean', delta=0.05, seed=42, k=4
+    )
 )
 
 metric = metrics.MAE()

@@ -28,6 +28,10 @@ cdef class LSHBuffer:
         The number of hash functions per table, i.e., the dimension of the projections.
     w
         The quantization radius.
+    p
+        p-norm value for the Minkowski metric. When `p=1`, this corresponds to the
+        Manhattan distance, while `p=2` corresponds to the Euclidean distance.
+        Only `p=2` is currently supported.
     seed
         Random number generator seed for reproducibility.
     """

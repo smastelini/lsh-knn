@@ -36,6 +36,8 @@ class RadiusNeighborsRegressor(base.Regressor):
         of the query point.
     w
         The quantization radius of the LSH scheme.
+    seed
+        Random number generator seed for reproducibility.
 
     Notes
     -----
@@ -98,6 +100,5 @@ class RadiusNeighborsRegressor(base.Regressor):
             return sum(xy[1] for xy in neighbors) / len(neighbors)
         else:  # weighted mean
             return (
-                sum(xy[1] / d for xy, d in zip(neighbors, dists)) /
-                sum(1 / d for d in dists)
+                sum(xy[1] / d for xy, d in zip(neighbors, dists)) / sum(1 / d for d in dists)
             )
