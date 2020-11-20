@@ -47,6 +47,7 @@ cdef class LSHBuffer:
         readonly long p
         readonly long seed
 
+        double _c
         long _next
         long _oldest
         double _pr_col
@@ -71,10 +72,16 @@ cdef class LSHBuffer:
             raise ValueError(f'Invalid value of "p". It must be either "1" or "2".')
         self.p = p
 
+        if self.p == 1:
+            self._c = self.R
+        else:
+            self._c = self.R * self.R
+
         self._pr_col = 1. - 2. * norm.cdf(-self.w) - (
             (2. / (math.sqrt(2. * math.pi) * self.w))
             * (1. - math.exp(-(math.pow(self.w, 2)) / 2.))
         )
+
         self.L = <long> math.ceil(
             math.log(1. / self.delta) / (- math.log(1. - math.pow(self._pr_col, self.k)))
         )
@@ -95,6 +102,13 @@ cdef class LSHBuffer:
     @property
     def success_probability(self) -> float:
         return 1 - (1 - math.pow(self._pr_col, self.k)) ** self.L
+
+
+    cdef double _distance(self, a, b):
+        return sum(
+            (abs(a.get(k, 0.) - b.get(k, 0.))) ** self.p
+            for k in set([*a.keys(), *b.keys()])
+        )
 
     cdef void _init_projections(self, dict x):
         """Initialize the random projections.
@@ -238,7 +252,10 @@ cdef class LSHBuffer:
             long pos
 
         for q in point_set:
-            dist = minkowski_distance(x, self._buffer[q][0], p=2)
+            dist = self._distance(x, self._buffer[q][0])
+
+            if dist > self._c:
+                continue
 
             # Retrieve points ordered by their distance to the query point
             pos = bisect.bisect(distances, dist)
