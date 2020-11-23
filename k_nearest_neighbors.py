@@ -149,7 +149,7 @@ class KNNRegressor(base.Regressor):
             if self._buffer.size == self.window_size:
                 warnings.warn(
                     'No nearest neighbors were found in the approximate search.\n'
-                    f'You might try to increase the value of "r" or "w".',
+                    f'You might try to increase the value of "r" or "c".',
                     category=RuntimeWarning
                 )
             return 0.
@@ -162,7 +162,7 @@ class KNNRegressor(base.Regressor):
             if self._buffer.size == self.window_size:
                 warnings.warn(
                     'The number of neighbors found was smaller than "n_neighbors".\n'
-                    f'You might want trying to increase the value of "r" or "w" to avoid that.',
+                    f'You might want trying to increase the value of "r" or "c" to avoid that.',
                     category=RuntimeWarning
                 )
         else:

@@ -21,10 +21,9 @@ dataset = iter(synth.Friedman(seed=1).take(50000))
 # )
 
 model = (
-    preprocessing.StandardScaler() |
-    KNNRegressor(
-        n_neighbors=3, window_size=1000, r=2, c=5, aggregation_method='mean',
-        delta=0.1, seed=42, k=4, w=4
+    preprocessing.StandardScaler() | KNNRegressor(
+        n_neighbors=3, window_size=1000, r=1, c=10, aggregation_method='mean',
+        delta=0.1, seed=42, k=4
     )
 )
 print(f'L={model["KNNRegressor"]._buffer.L}')
