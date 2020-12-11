@@ -22,7 +22,7 @@ cdef class LSHBuffer:
     R
         The radius of the hypersphere that defines the R-Nearest Neighbours around a query point.
     c
-        The approximation factor. Points within the distance `c * r` of a query point are
+        The approximation factor. Points within the distance `c * R` of a query point are
         guaranteed to be found with probability `1 - delta`.
     delta
         Acceptable probability of failing to return a "c * R"-neighbour for a query point.
@@ -125,11 +125,12 @@ cdef class LSHBuffer:
     def P2(self) -> float:
         return 1 - (1 - math.pow(self._pr_wrong_col, self.k)) ** self.L
 
-
+    @cython.boundscheck(False)  # Deactivate bounds checking
+    @cython.wraparound(False)   # Deactivate negative indexing
     cdef double _distance(self, a, b):
         return sum(
             (abs(a.get(k, 0.) - b.get(k, 0.))) ** self.p
-            for k in set([*a.keys(), *b.keys()])
+            for k in {*a.keys(), *b.keys()}
         )
 
     cdef void _init_projections(self, dict x):
@@ -146,7 +147,7 @@ cdef class LSHBuffer:
             for h in range(self.L):
                 self._rprojs[h] = [None] * self.k
                 for p in range(self.k):
-                    # Initalize random projections by sampling from a standard Cauchy dist
+                    # Initialize random projections by sampling from a standard Cauchy dist
                     self._rprojs[h][p] = Axb(
                         a=VectorDict(data={fid: np.random.standard_cauchy() for fid in x}),
                         b=self._rng.uniform(0, self.w)
@@ -155,12 +156,14 @@ cdef class LSHBuffer:
             for h in range(self.L):
                 self._rprojs[h] = [None] * self.k
                 for p in range(self.k):
-                    # Initalize random projections by sampling from a standard Gaussian dist
+                    # Initialize random projections by sampling from a standard Gaussian dist
                     self._rprojs[h][p] = Axb(
                         a=VectorDict(data={fid: self._rng.gauss(mu=0, sigma=1) for fid in x}),
                         b=self._rng.uniform(0, self.w)
                     )
 
+    @cython.boundscheck(False)  # Deactivate bounds checking
+    @cython.wraparound(False)   # Deactivate negative indexing
     cdef list _hash(self, dict x):
         """Generate the codes of a given observation for each of the L hash tables.
 
@@ -181,11 +184,15 @@ cdef class LSHBuffer:
 
         return codes
 
+    @cython.boundscheck(False)  # Deactivate bounds checking
+    @cython.wraparound(False)   # Deactivate negative indexing
     cdef void _add_to_hash(self, dict x, long index):
         # Save buffer index in the correct hash positions
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].add(index)  # Add index to bucket
 
+    @cython.boundscheck(False)  # Deactivate bounds checking
+    @cython.wraparound(False)   # Deactivate negative indexing
     cdef void _rem_from_hash(self, dict x, long index):
         for h, code in enumerate(self._hash(x)):
             self._lsh[h][code].discard(index)
@@ -250,9 +257,11 @@ cdef class LSHBuffer:
 
             return x, y
 
+    @cython.boundscheck(False)  # Deactivate bounds checking
+    @cython.wraparound(False)   # Deactivate negative indexing
     cpdef tuple query(self, dict x, double max_points=-1):
         if max_points < 0:
-            max_points = math.inf
+            max_points = UINT_MAX
 
         cdef:
             long count = 0
@@ -260,7 +269,7 @@ cdef class LSHBuffer:
 
         # Retrieve points
         for h, code in enumerate(self._hash(x)):
-            point_set |= self._lsh[h][code]
+            point_set.update(self._lsh[h][code])
 
             count += len(self._lsh[h][code])
             # Approximated search: stop once max_points are explored
